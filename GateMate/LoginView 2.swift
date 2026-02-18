@@ -1,70 +1,55 @@
 import SwiftUI
-import AuthenticationServices
 
 struct LoginView: View {
     var onSuccess: () -> Void
-    @Environment(\.colorScheme) var colorScheme
+    var onBack: () -> Void
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack {
+            // Back Button
+            HStack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.black.opacity(0.1))
+                        .clipShape(Circle())
+                }
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 50)
+            
             Spacer()
             
-            // White Card
-            VStack(spacing: 30) {
-                TextField("Email", text: .constant(""))
-                    .padding()
-                    .background(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.5)))
-                
-                SecureField("Password", text: .constant(""))
-                    .padding()
-                    .background(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.5)))
-                
-                Button(action: {
-                    // Action for manual login
-                }) {
-                    Text("Sign In")
-                        .fontWeight(.bold)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color(red: 160/255, green: 190/255, blue: 210/255))
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
-                }
-                
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 80))
+                .foregroundColor(.white)
+                .padding(.bottom, 20)
+            
+            Text("Secure Login")
+                .font(.largeTitle)
+                .bold()
+                .foregroundColor(.white)
+            
+            Text("Sign in to connect with travelers")
+                .foregroundColor(.white.opacity(0.8))
+                .padding(.bottom, 40)
+            
+            Button(action: onSuccess) {
                 HStack {
-                    Rectangle().frame(height: 1).foregroundColor(.gray.opacity(0.3))
-                    Text("or").foregroundColor(.gray)
-                    Rectangle().frame(height: 1).foregroundColor(.gray.opacity(0.3))
+                    Image(systemName: "apple.logo")
+                    Text("Sign in with Apple")
                 }
-                
-                // APPLE SIGN IN
-                SignInWithAppleButton(
-                    onRequest: { request in
-                        request.requestedScopes = [.fullName, .email]
-                    },
-                    onCompletion: { result in
-                        switch result {
-                        case .success(_):
-                            onSuccess()
-                        case .failure(let error):
-                            print("Login error: \(error)")
-                        }
-                    }
-                )
-                .frame(height: 50)
-                .signInWithAppleButtonStyle(.black)
-                
-                // DEBUG BYPASS
-                Button("🛠️ Skip for Testing") {
-                    onSuccess()
-                }
-                .font(.caption)
-                .foregroundColor(.blue)
+                .font(.headline)
+                .foregroundColor(.black)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.white)
+                .cornerRadius(15)
             }
-            .padding()
-            .background(Color.white)
-            .cornerRadius(30)
-            .padding()
+            .padding(.horizontal, 40)
             
             Spacer()
         }

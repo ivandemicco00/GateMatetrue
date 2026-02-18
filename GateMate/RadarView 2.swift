@@ -3,38 +3,53 @@ import SwiftUI
 struct RadarView: View {
     @Binding var foundTargets: [Target]
     var onFound: () -> Void
+    var onBack: () -> Void
     
     @StateObject private var ckService = CloudKitService()
     @State private var isAnimating = false
     
     var body: some View {
         VStack {
-            // TESTI DI STATO
+            // Back Button (Cancel Search)
+            HStack {
+                Button(action: onBack) {
+                    Image(systemName: "xmark")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.black.opacity(0.1))
+                        .clipShape(Circle())
+                }
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 50)
+            
+            // Status Text
             if ckService.isSearching {
                 Text("Scanning Area...")
                     .font(.headline)
-                    .padding(.top, 60)
+                    .padding(.top, 20)
             } else if !ckService.nearbyTargets.isEmpty {
                 Text("Targets Acquired!")
                     .font(.headline)
                     .foregroundColor(Color(red: 60/255, green: 80/255, blue: 100/255))
-                    .padding(.top, 60)
+                    .padding(.top, 20)
             } else {
-                Text("No targets found.")
+                Text("No targets nearby.")
                     .font(.headline)
                     .foregroundColor(.red)
-                    .padding(.top, 60)
+                    .padding(.top, 20)
             }
             
             Spacer()
             
+            // Radar UI
             ZStack {
-                // CERCHI RADAR
                 Circle().stroke(Color.white.opacity(0.8), lineWidth: 1).frame(width: 150)
                 Circle().stroke(Color.white.opacity(0.6), lineWidth: 1).frame(width: 250)
                 
                 if ckService.isSearching {
-                    // PALLINE ANIMATE
                     ForEach(0..<3) { i in
                         Circle()
                             .fill(Color(red: 100/255, green: 150/255, blue: 200/255).opacity(0.6))
@@ -44,13 +59,10 @@ struct RadarView: View {
                             .animation(Animation.linear(duration: 3.0).repeatForever(autoreverses: false).delay(Double(i)*0.5), value: isAnimating)
                     }
                 } else if !ckService.nearbyTargets.isEmpty {
-                    // ICONA SUCCESSO
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 80))
                         .foregroundColor(Color(red: 100/255, green: 180/255, blue: 120/255))
-                        .shadow(radius: 10)
                 } else {
-                    // ICONA FALLIMENTO
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 80))
                         .foregroundColor(.red.opacity(0.6))
@@ -60,11 +72,9 @@ struct RadarView: View {
                 isAnimating = true
                 ckService.startScanning()
             }
-            // AUTOMAZIONE
             .onChange(of: ckService.isSearching) { oldValue, isSearching in
                 if !isSearching && !ckService.nearbyTargets.isEmpty {
                     self.foundTargets = ckService.nearbyTargets
-                    // Ritardo l'auto-navigazione per farti vedere la spunta verde
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         onFound()
                     }
@@ -73,26 +83,7 @@ struct RadarView: View {
             
             Spacer()
             
-            // --- PIANO B: BOTTONE MANUALE ---
-            // Se l'automazione fallisce ma i dati ci sono, appare questo bottone
-            if !ckService.isSearching && !ckService.nearbyTargets.isEmpty {
-                Button(action: {
-                    self.foundTargets = ckService.nearbyTargets
-                    onFound()
-                }) {
-                    Text("View Targets Now")
-                        .fontWeight(.bold)
-                        .padding(.horizontal, 40)
-                        .padding(.vertical, 15)
-                        .background(Color.white)
-                        .foregroundColor(Color(red: 60/255, green: 80/255, blue: 100/255))
-                        .cornerRadius(30)
-                        .shadow(radius: 5)
-                }
-                .padding(.bottom, 50)
-            }
-            
-            // TASTO RIPROVA (Se non trova nessuno)
+            // Manual Retry Button
             if !ckService.isSearching && ckService.nearbyTargets.isEmpty {
                 Button("Try Again") {
                     ckService.startScanning()
