@@ -3,125 +3,130 @@ import CloudKit
 import CoreLocation
 import Combine
 
-
-struct Target: Identifiable {
-    let id: String
-    let name: String
-    let flightInfo: String
-    let location: CLLocation
-    var color: String = "red" // Colore di default
-}
-
-class CloudKitService: NSObject, ObservableObject, CLLocationManagerDelegate {
+class CloudKitService: ObservableObject {
     
-    // --- CLOUDKIT SETUP ---
-    // Puntiamo ESPLICITAMENTE al tuo container specifico
-    private let container = CKContainer(identifier: "iCloud.Targets")
-    private let publicDB = CKContainer(identifier: "iCloud.Targets").publicCloudDatabase
-    // --- GPS SETUP ---
-    private let locationManager = CLLocationManager()
-    @Published var currentLocation: CLLocation?
+    let publicDB = CKContainer(identifier: "iCloud.Targets").publicCloudDatabase
     
-    // --- OUTPUT DATI ---
-    @Published var nearbyTargets: [Target] = []
-    @Published var isSearching = false
-    @Published var permissionError = false
+    @Published var currentLocation: CLLocation? = nil
+    @Published var isSearching: Bool = false
+    @Published var downloadedTargets: [Target] = []
     
-    override init() {
-        super.init()
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.requestWhenInUseAuthorization()
+    // --- 1. SALVATAGGIO PROFILO ---
+    func saveMyProfile(appleUserID: String, name: String, age: String, gender: String, languages: String, imageData: Data?, airport: String, flight: String, destination: String, departureTime: Date, completion: @escaping (Bool, String?) -> Void) {
+        
+        let locationToSave = currentLocation ?? CLLocation(latitude: 0, longitude: 0)
+        let recordID = CKRecord.ID(recordName: appleUserID)
+        
+        // ATTENZIONE: IL NOME DELLA TABELLA È "Target" (Singolare)
+        let myRecord = CKRecord(recordType: "Target", recordID: recordID)
+        
+        myRecord["appleUserID"] = appleUserID
+        myRecord["name"] = name
+        myRecord["age"] = age
+        myRecord["gender"] = gender
+        myRecord["languages"] = languages
+        myRecord["airport"] = airport
+        myRecord["flightInfo"] = flight
+        myRecord["destination"] = destination
+        myRecord["departureTime"] = departureTime
+        myRecord["location"] = locationToSave
+        
+        if let data = imageData {
+            let tempDirectory = FileManager.default.temporaryDirectory
+            let fileURL = tempDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+            do {
+                try data.write(to: fileURL)
+                let asset = CKAsset(fileURL: fileURL)
+                myRecord["profileImage"] = asset
+            } catch { print("⚠️ Impossibile preparare l'immagine: \(error)") }
+        }
+        
+        let modifyOperation = CKModifyRecordsOperation(recordsToSave: [myRecord], recordIDsToDelete: nil)
+        modifyOperation.savePolicy = .allKeys
+        modifyOperation.modifyRecordsResultBlock = { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success: completion(true, nil)
+                case .failure(let error): completion(false, error.localizedDescription)
+                }
+            }
+        }
+        publicDB.add(modifyOperation)
     }
     
-    // --- 1. AVVIO SCANSIONE ---
-    func startScanning() {
+    // --- 2. RICERCA CON IL RADAR ---
+    func startScanning(myAirport: String, myTime: Date, myUserID: String) {
         self.isSearching = true
-        self.nearbyTargets = [] // Resetta la lista
-        
-        // Se abbiamo già il GPS, cerchiamo subito. Altrimenti lo chiediamo.
-        if let loc = locationManager.location {
-            fetchFromCloudKit(center: loc)
-        } else {
-            locationManager.requestLocation()
+        fetchNearbyTargets(myAirport: myAirport, myTime: myTime, myUserID: myUserID) { targets in
+            DispatchQueue.main.async {
+                self.downloadedTargets = targets
+                self.isSearching = false
+            }
         }
     }
     
-    // --- 2. GESTIONE GPS ---
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
-        self.currentLocation = location
-        // Abbiamo la posizione -> Cerchiamo su CloudKit
-        fetchFromCloudKit(center: location)
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Errore GPS: \(error.localizedDescription)")
-        self.isSearching = false
-        self.permissionError = true
-    }
-    
-    // --- 3. INTERROGAZIONE CLOUDKIT ---
-    // --- VERSIONE DI DEBUG ---
-    private func fetchFromCloudKit(center: CLLocation) {
+    // --- 3. DOWNLOAD DA CLOUDKIT E FILTRAGGIO LOCALE ---
+    private func fetchNearbyTargets(myAirport: String, myTime: Date, myUserID: String, completion: @escaping ([Target]) -> Void) {
         
-        print("--- INIZIO RICERCA CLOUDKIT ---")
-        print("La mia posizione simulata è: \(center.coordinate.latitude), \(center.coordinate.longitude)")
-        
-        // 1. PREDICATO "PRENDI TUTTO": Ignoriamo la distanza per ora.
-        // Se questo funziona, il problema era il GPS.
-        let predicate = NSPredicate(value: true)
-        
+        // Chiediamo a CloudKit SOLO chi è in questo aeroporto (meno possibilità di crash server)
+        let predicate = NSPredicate(format: "airport == %@", myAirport)
         let query = CKQuery(recordType: "Target", predicate: predicate)
-        // Rimuoviamo il sort per location che potrebbe fallire se la location è nil
-        query.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
         
-        publicDB.fetch(withQuery: query, inZoneWith: nil, desiredKeys: nil, resultsLimit: 10) { result in
-            
+        publicDB.fetch(withQuery: query, inZoneWith: nil, desiredKeys: nil, resultsLimit: 50) { result in
             DispatchQueue.main.async {
                 switch result {
-                case .success(let successData):
-                    let matches = successData.matchResults
-                    print("CloudKit ha restituito \(matches.count) risultati grezzi.")
+                case .success(let matchResults):
+                    var targetsFound: [Target] = []
                     
-                    self.nearbyTargets = matches.compactMap { (recordID, recordResult) -> Target? in
-                        switch recordResult {
-                        case .success(let record):
-                            // DEBUG: Stampa cosa c'è davvero nel record
-                            print("-------------------------------------------------")
-                            print("RECORD TROVATO: \(record.recordID.recordName)")
-                            print("Chiavi disponibili: \(record.allKeys())")
+                    for (_, recordResult) in matchResults.matchResults {
+                        if case .success(let record) = recordResult {
+                            let appleUserID = record["appleUserID"] as? String ?? ""
                             
-                            // Tentativo di estrazione
-                            let name = record["name"] as? String
-                            let flight = record["flightInfo"] as? String
-                            let loc = record["location"] as? CLLocation
+                            // 1. Scarta te stesso
+                            if appleUserID == myUserID { continue }
                             
-                            // Debug degli errori
-                            if name == nil { print("ERRORE: Campo 'name' nullo o nome sbagliato.") }
-                            if flight == nil { print("ERRORE: Campo 'flightInfo' nullo o nome sbagliato.") }
-                            if loc == nil { print("ERRORE: Campo 'location' nullo o nome sbagliato.") }
+                            let departureTime = record["departureTime"] as? Date
                             
-                            guard let n = name, let f = flight, let l = loc else {
-                                print("SCARTATO: Mancano dati obbligatori.")
-                                return nil
+                            // 2. Filtro Orario: Mostra solo chi ha un volo a +/- 4 ore di differenza dal tuo
+                            if let depTime = departureTime {
+                                let timeDifference = abs(depTime.timeIntervalSince(myTime))
+                                if timeDifference > (4 * 3600) { continue } // 4 ore = 14400 secondi
                             }
                             
-                            return Target(id: record.recordID.recordName, name: n, flightInfo: f, location: l)
+                            let name = record["name"] as? String ?? "Passeggero"
+                            let age = record["age"] as? String ?? ""
+                            let gender = record["gender"] as? String ?? ""
+                            let languages = record["languages"] as? String ?? ""
+                            let airport = record["airport"] as? String ?? ""
+                            let flightInfo = record["flightInfo"] as? String ?? ""
+                            let destination = record["destination"] as? String ?? ""
+                            let location = record["location"] as? CLLocation
                             
-                        case .failure(let error):
-                            print("Errore nel record singolo: \(error)")
-                            return nil
+                            var fetchedImageData: Data? = nil
+                            if let asset = record["profileImage"] as? CKAsset, let fileURL = asset.fileURL {
+                                fetchedImageData = try? Data(contentsOf: fileURL)
+                            }
+                            
+                            let target = Target(appleUserID: appleUserID, name: name, age: age, gender: gender, languages: languages, profileImageData: fetchedImageData, airport: airport, flightInfo: flightInfo, destination: destination, departureTime: departureTime, location: location)
+                            targetsFound.append(target)
                         }
                     }
                     
+                    // 3. Ordina per vicinanza fisica (GPS)
+                    if let myLoc = self.currentLocation {
+                        targetsFound.sort { t1, t2 in
+                            let distance1 = t1.location?.distance(from: myLoc) ?? Double.infinity
+                            let distance2 = t2.location?.distance(from: myLoc) ?? Double.infinity
+                            return distance1 < distance2
+                        }
+                    }
+                    
+                    completion(targetsFound)
+                    
                 case .failure(let error):
-                    print("ERRORE CRITICO CLOUDKIT: \(error.localizedDescription)")
+                    print("❌ ERRORE DOWNLOAD CLOUDKIT: \(error.localizedDescription)")
+                    completion([])
                 }
-                
-                // Fine ricerca
-                self.isSearching = false
-                print("--- FINE RICERCA (Target validi: \(self.nearbyTargets.count)) ---")
             }
         }
     }

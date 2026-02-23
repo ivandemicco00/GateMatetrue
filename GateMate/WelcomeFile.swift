@@ -16,7 +16,7 @@ struct WelcomeView: View {
                 .font(.system(size: 50, weight: .bold))
                 .foregroundColor(.white)
             
-            Text("Find your flight companion")
+            Text("Find your Gate Mate")
                 .font(.title3)
                 .foregroundColor(.white.opacity(0.8))
                 .padding(.top, 5)
