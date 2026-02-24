@@ -66,4 +66,3 @@ struct SorryAirportView: View {
 //
 //  Created by Ivan De Micco on 19/02/26.
 //
-

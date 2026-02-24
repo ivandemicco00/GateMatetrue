@@ -5,7 +5,7 @@ import Combine
 
 class CloudKitService: ObservableObject {
     
-    let publicDB = CKContainer(identifier: "iCloud.Targets").publicCloudDatabase
+    let publicDB = CKContainer.default().publicCloudDatabase
     
     @Published var currentLocation: CLLocation? = nil
     @Published var isSearching: Bool = false
